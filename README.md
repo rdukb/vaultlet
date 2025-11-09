@@ -24,7 +24,7 @@ Vaultlet creates strong passwords locally, stores them in an encrypted history o
 
 ## 🧱 Installation
 ```bash
-git clone https://github.com/rajeshd/vaultlet.git
+git clone https://github.com/rdukb/vaultlet.git
 cd vaultlet
 python -m venv .venv
 source .venv/bin/activate   # Windows: .\.venv\Scripts\activate
@@ -81,4 +81,4 @@ python -m app.main --wipe-history
 ---
 
 ## 📜 License
-[MIT](./LICENSE) © 2025 Rajesh Dorairajan
+[MIT](./LICENSE) © 2025 rdukb
