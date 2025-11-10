@@ -56,9 +56,11 @@ UI options let you:
 ## 🛠️ Build (PyInstaller)
 ```bash
 pip install pyinstaller
-pyinstaller --onefile --windowed app/main.py --name Vaultlet
+pyinstaller --onedir --windowed app/main.py --name Vaultlet
 ```
-The resulting binary lives under `dist/Vaultlet`. Include the `requirements.txt` dependencies (especially `tk`, `cryptography`, and `keyring`) on the target system.
+This produces a `dist/Vaultlet/` folder containing the executable and support files.
+
+> ⚡️ Tip: skip UPX compression; compressed bundles launch slower because they have to decompress at runtime.
 
 ---
 

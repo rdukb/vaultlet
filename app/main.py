@@ -1,19 +1,15 @@
+from __future__ import annotations
+
 import base64
+import secrets
 import sqlite3
-import argparse
 import string
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 import tkinter as tk
-from tkinter import ttk, messagebox
-
-# --- Optional dependencies (see requirements.txt) ---
-# cryptography: AES-GCM encryption for history at rest
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-# keyring: stores a per-user encryption key in OS keychain/credential vault
-import keyring
-import secrets
+from tkinter import messagebox, ttk
 
 APP_NAME = "Vaultlet"
 SERVICE_NAME = f"{APP_NAME}-key"
@@ -37,11 +33,41 @@ LEET_REPLACEMENTS = {
     "z": ["2"],
 }
 
+_KEYRING = None
+_AESGCM = None
+_CACHED_KEY: Optional[bytes] = None
+
+
+def _load_keyring():
+    global _KEYRING
+    if _KEYRING is None:
+        import keyring as _keyring_mod
+
+        _KEYRING = _keyring_mod
+    return _KEYRING
+
+
+def _load_aesgcm():
+    global _AESGCM
+    if _AESGCM is None:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _aesgcm_cls
+
+        _AESGCM = _aesgcm_cls
+    return _AESGCM
+
+
+def _get_encryption_key() -> bytes:
+    global _CACHED_KEY
+    if _CACHED_KEY is None:
+        _CACHED_KEY = _get_or_create_key()
+    return _CACHED_KEY
+
 def _ensure_dirs():
     DB_DIR.mkdir(parents=True, exist_ok=True)
 
 def _get_or_create_key() -> bytes:
     # 32-byte key for AES-256-GCM, stored in OS keychain
+    keyring = _load_keyring()
     key = keyring.get_password(SERVICE_NAME, "master")
     if key is None:
         raw = secrets.token_bytes(32)
@@ -68,7 +94,8 @@ def _db_init():
 
 def _encrypt(key: bytes, plaintext: bytes):
     # AES-GCM nonce 12 bytes
-    aes = AESGCM(key)
+    aes_cls = _load_aesgcm()
+    aes = aes_cls(key)
     nonce = secrets.token_bytes(12)
     ct = aes.encrypt(nonce, plaintext, None)
     # cryptography returns nonce + ciphertext|tag combined at decrypt time; here we split:
@@ -78,11 +105,13 @@ def _encrypt(key: bytes, plaintext: bytes):
     return ciphertext, nonce, tag
 
 def _decrypt(key: bytes, ciphertext: bytes, nonce: bytes, tag: bytes) -> bytes:
-    aes = AESGCM(key)
+    aes_cls = _load_aesgcm()
+    aes = aes_cls(key)
     combined = ciphertext + tag
     return aes.decrypt(nonce, combined, None)
 
-def _store_history(key: bytes, pwd_str: str, size_bytes: int):
+def _store_history(pwd_str: str, size_bytes: int):
+    key = _get_encryption_key()
     _db_init()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -94,7 +123,8 @@ def _store_history(key: bytes, pwd_str: str, size_bytes: int):
     conn.commit()
     conn.close()
 
-def _iter_history(key: bytes):
+def _iter_history():
+    key = _get_encryption_key()
     _db_init()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -176,6 +206,8 @@ def generate_password(length: int, exclude: str = "", pronounceable: bool = Fals
     return "".join(chars)
 
 def parse_args():
+    import argparse
+
     p = argparse.ArgumentParser(description="Local password generator with silent, encrypted history.")
     p.add_argument("--export-history", metavar="CSV_PATH", help="Export full history to CSV (not shown in UI).")
     p.add_argument("--wipe-history", action="store_true", help="Irreversibly wipe stored history.")
@@ -189,9 +221,6 @@ class App(tk.Tk):
         # Slightly nicer default sizing
         self.geometry("520x260")
         self.resizable(False, False)
-
-        self.key = _get_or_create_key()
-        _db_init()
 
         # Vars
         self.size_var = tk.IntVar(value=32)
@@ -247,6 +276,9 @@ class App(tk.Tk):
         for i in range(3):
             frm.grid_columnconfigure(i, weight=0)
 
+        # Warm up the database/keyring after initial UI render.
+        self.after(200, self._warm_up_history)
+
     def on_generate(self):
         length = self.size_var.get()
         if length < 8 or length > 128:
@@ -259,7 +291,7 @@ class App(tk.Tk):
             return
         self.pwd_var.set(pwd)
         try:
-            _store_history(self.key, pwd, length)
+            _store_history(pwd, length)
         except Exception as e:
             messagebox.showwarning("History error", f"Could not save history: {e}")
 
@@ -286,9 +318,15 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _warm_up_history(self):
+        try:
+            _db_init()
+        except Exception:
+            pass
+
 def export_history_csv(path: Path):
-    key = _get_or_create_key()
-    rows = list(_iter_history(key))
+    _db_init()
+    rows = list(_iter_history())
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
@@ -301,10 +339,9 @@ def export_history_csv(path: Path):
 
 def main():
     args = parse_args()
-    _ensure_dirs()
-    _db_init()
 
     if args.wipe_history:
+        _db_init()
         _wipe_history()
         print("History wiped.")
         return
