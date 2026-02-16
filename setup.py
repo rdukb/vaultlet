@@ -5,8 +5,8 @@ here = pathlib.Path(__file__).parent.resolve()
 
 setup(
     name="vaultlet",
-    version="0.1.0",
-    description="Lightweight cross-platform password generator with encrypted local history",
+    version="1.0.0",
+    description="Local secrets vault with passkey unlock, encrypted backup import/export, and password generation",
     long_description=(here / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     author="Rajesh Dorairajan",
@@ -14,8 +14,8 @@ setup(
     license="MIT",
     url="https://github.com/rajeshd/vaultlet",
     packages=find_packages(),
-    install_requires=["cryptography>=43", "keyring>=25"],
-    python_requires=">=3.8",
+    install_requires=["cryptography>=43", "keyring>=25", "webauthn>=2.7", "argon2-cffi>=23"],
+    python_requires=">=3.10",
     entry_points={
         "console_scripts": [
             "vaultlet = app.main:main",

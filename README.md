@@ -1,86 +1,83 @@
-# Vaultlet 🔐
-**A minimalist, cross-platform password generator with encrypted local history.**
+# Vaultlet
+A local-first secrets vault with passkey unlock, encrypted backup import/export, and secure password generation.
 
-Vaultlet creates strong passwords locally, stores them in an encrypted history on disk, and never sends data off device. The first character is always alphabetic, and you can both exclude characters and opt into a pronounceable mode that swaps symbols for familiar sounds.
+## Features
+- Local desktop UI on macOS and Windows (Tkinter)
+- Secret types: `password`, `api_key`, `secure_note`
+- AES-256-GCM encrypted vault at rest
+- Device passkey unlock via WebAuthn ceremony in your system browser
+- Recovery-key fallback for passkey loss
+- Multiple passkeys: enroll, rename, revoke
+- Generator tab with explicit "Save to Vault"
+- Import support: LastPass CSV and Google Password Manager CSV
+- Encrypted Vaultlet backup export/import (UI + CLI, same-vault restore in v1)
+- Legacy migration from `pw_history` to vault items (one-time)
+- Clipboard auto-clear after copy
 
----
+## Security model (v1)
+- A random vault DEK encrypts each vault item payload.
+- DEK is wrapped by:
+  - local keychain KEK (`keyring`)
+  - recovery-key-derived KEK (`argon2id`)
+- Unlock requires a successful WebAuthn passkey assertion for normal flow.
+- Auto-lock after 5 minutes of inactivity.
 
-## ✨ Features
-- Works on **macOS** and **Windows** with a Tkinter desktop UI
-- Passwords pull from ASCII letters, digits, and punctuation with user-defined exclusions
-- **Pronounceable** mode alternates consonants/vowels and applies leet-style symbol substitutions
-- Clipboard auto-clears after 30 s (configurable in code)
-- History is encrypted with AES-GCM; export or wipe from the CLI
+## Requirements
+- Python 3.10+
+- Dependencies in `requirements.txt`
+- Tk runtime
+- Browser with WebAuthn support
 
----
-
-## � Requirements
-- Python **3.10+**
-- `cryptography` and `keyring` (installed via `requirements.txt`)
-- Tk runtime (macOS Homebrew example: `brew install python-tk@3.12`)
-- Optional: `pyinstaller` for packaging a standalone app
-
----
-
-## 🧱 Installation
+## Install
 ```bash
 git clone https://github.com/rdukb/vaultlet.git
 cd vaultlet
-python -m venv .venv
-source .venv/bin/activate   # Windows: .\.venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### macOS Tk setup
-Homebrew Python builds ship without Tk; install it once per machine:
-```bash
-brew install python-tk@3.12
-```
-Re-create your virtual environment after installing to pick up `_tkinter`.
-
----
-
-## 🚀 Running
+## Run desktop app
 ```bash
 source .venv/bin/activate
 python -m app.main
 ```
 
-UI options let you:
-- Choose password length (8–128)
-- Exclude characters from the allowed alphabet
-- Toggle pronounceable mode that keeps the first character a letter and substitutes symbolic phonetics
+First run:
+1. Initialize vault
+2. Save recovery key securely
+3. Enroll first passkey
 
----
+## CLI
+```bash
+# Vault status
+python -m app.main vault status
 
-## 🛠️ Build (PyInstaller)
+# Export encrypted backup (interactive passkey auth)
+python -m app.main vault export --out backup.vaultlet.json
+
+# Import encrypted backup
+python -m app.main vault import --in backup.vaultlet.json
+
+# Import CSV source
+python -m app.main vault import-csv --source lastpass --file lastpass.csv
+python -m app.main vault import-csv --source google --file google.csv
+
+# Wipe vault
+python -m app.main vault wipe
+```
+
+## Build (PyInstaller)
 ```bash
 pip install pyinstaller
 pyinstaller --onedir --windowed app/main.py --name Vaultlet
 ```
-This produces a `dist/Vaultlet/` folder containing the executable and support files.
 
-> ⚡️ Tip: skip UPX compression; compressed bundles launch slower because they have to decompress at runtime.
+## Notes
+- Plaintext secret export is removed. Use encrypted backup export.
+- Passkeys are device-bound and are not portable in backups.
+- v1 backup import validates vault keyset and currently supports same-vault restore.
+- CSV imports may contain plaintext secrets: delete source files securely after import.
 
----
-
-## 🧰 CLI Utilities
-```bash
-# Export encrypted history to CSV
-python -m app.main --export-history history.csv
-
-# Wipe stored history
-python -m app.main --wipe-history
-```
-
----
-
-## 🔒 Security
-- AES-256-GCM encryption with a per-user key stored in the OS keychain via `keyring`
-- Passwords never leave your system
-- No telemetry, analytics, or cloud sync
-
----
-
-## 📜 License
-[MIT](./LICENSE) © 2025 rdukb
+## License
+[MIT](./LICENSE)
