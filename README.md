@@ -28,56 +28,104 @@ A local-first secrets vault with passkey unlock, encrypted backup import/export,
 - Tk runtime
 - Browser with WebAuthn support
 
-## Install
+## Install (uv recommended)
 ```bash
 git clone https://github.com/rdukb/vaultlet.git
 cd vaultlet
-python3 -m venv .venv
+uv venv
 source .venv/bin/activate
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
-## Run desktop app
+If you do not use `uv`, you can use `python -m venv` and `pip` instead.
+
+## Run desktop app (uv)
 ```bash
-source .venv/bin/activate
-python -m app.main
+uv run python -m app.main
 ```
 
-First run:
-1. Initialize vault
-2. Save recovery key securely
-3. Enroll first passkey
+## First-run setup (detailed)
+1. Launch the app:
+   - `uv run python -m app.main`
+2. In the setup prompt, click **Yes** to initialize your local vault.
+3. Vaultlet will show a **Recovery Key**:
+   - Copy it immediately.
+   - Store it in a secure place outside Vaultlet (for example: offline password manager entry, printed copy in safe).
+   - This is required if all passkeys are lost.
+4. Vaultlet opens your system browser for passkey enrollment (`localhost` WebAuthn flow):
+   - Click **Continue** in the browser page.
+   - Complete biometric/PIN verification on your device.
+5. Return to the app. Vault should now be unlocked and ready.
+6. Optional hardening right away:
+   - Go to the **Passkeys** tab and enroll a second backup passkey on another device.
 
 ## CLI
 ```bash
 # Vault status
-python -m app.main vault status
+uv run python -m app.main vault status
 
 # Export encrypted backup (interactive passkey auth)
-python -m app.main vault export --out backup.vaultlet.json
+uv run python -m app.main vault export --out backup.vaultlet.json
 
 # Import encrypted backup
-python -m app.main vault import --in backup.vaultlet.json
+uv run python -m app.main vault import --in backup.vaultlet.json
 
 # Import CSV source
-python -m app.main vault import-csv --source lastpass --file lastpass.csv
-python -m app.main vault import-csv --source google --file google.csv
+uv run python -m app.main vault import-csv --source lastpass --file lastpass.csv
+uv run python -m app.main vault import-csv --source google --file google.csv
 
 # Wipe vault
-python -m app.main vault wipe
+uv run python -m app.main vault wipe
 ```
 
 ## Build (PyInstaller)
 ```bash
-pip install pyinstaller
-pyinstaller --onedir --windowed app/main.py --name Vaultlet
+# run pyinstaller via uv without globally installing it
+uvx --from pyinstaller pyinstaller --onedir --windowed app/main.py --name Vaultlet
 ```
+
+## Migration guide
+### A) Migrate from pre-v1 Vaultlet local history (`pw_history`)
+- Supported path: automatic one-time migration during first unlocked v1 session.
+- What to do:
+  1. Start v1 and complete first-run setup.
+  2. Unlock vault successfully.
+  3. If legacy data exists and the old keychain key is accessible, Vaultlet migrates entries automatically and shows a summary.
+- Result:
+  - Legacy password history entries are converted into vault `password` items.
+  - Legacy table is preserved as backup (`pw_history_legacy_backup`).
+
+### B) Migrate from LastPass
+- UI path:
+  1. Export CSV from LastPass.
+  2. Open Vaultlet -> **Import / Export** tab -> **Import LastPass CSV**.
+  3. Review preview (rows, duplicates, to-import), then confirm.
+  4. Verify imported items.
+- CLI path:
+  - `uv run python -m app.main vault import-csv --source lastpass --file lastpass.csv`
+
+### C) Migrate from Google Password Manager
+- UI path:
+  1. Export CSV from Google Password Manager.
+  2. Open Vaultlet -> **Import / Export** tab -> **Import Google CSV**.
+  3. Review preview and confirm.
+- CLI path:
+  - `uv run python -m app.main vault import-csv --source google --file google.csv`
+
+### D) Restore from Vaultlet encrypted backup
+- Export:
+  - `uv run python -m app.main vault export --out backup.vaultlet.json`
+- Import:
+  - `uv run python -m app.main vault import --in backup.vaultlet.json`
 
 ## Notes
 - Plaintext secret export is removed. Use encrypted backup export.
 - Passkeys are device-bound and are not portable in backups.
 - v1 backup import validates vault keyset and currently supports same-vault restore.
-- CSV imports may contain plaintext secrets: delete source files securely after import.
+- CSV import behavior:
+  - duplicates are skipped and reported
+  - unsupported source fields are preserved in item notes metadata
+- CSV exports from other tools are plaintext secrets: securely delete source files after successful import.
 
 ## License
 [MIT](./LICENSE)
