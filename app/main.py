@@ -155,8 +155,27 @@ def _handle_vault_command(args: argparse.Namespace) -> int:
     raise RuntimeError(f"Unsupported vault command: {args.vault_command}")
 
 
+def _configure_desktop_process_identity() -> None:
+    if sys.platform != "darwin":
+        return
+
+    try:
+        import ctypes
+        import ctypes.util
+
+        libc_path = ctypes.util.find_library("c")
+        if not libc_path:
+            return
+        libc = ctypes.CDLL(libc_path)
+        if hasattr(libc, "setprogname"):
+            libc.setprogname(APP_NAME.encode("utf-8"))
+    except Exception:
+        pass
+
+
 def _launch_desktop_app() -> int:
     vault, passkeys = _build_services()
+    _configure_desktop_process_identity()
     from app.ui.app import run_desktop_app
 
     run_desktop_app(vault, passkeys)

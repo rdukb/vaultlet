@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import sys
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
-from typing import Any
+from typing import Any, Callable
 
 from app.auth.passkey import PasskeyAuthManager
 from app.config import APP_NAME, AUTO_LOCK_SECONDS, CLIPBOARD_CLEAR_SEC
@@ -144,7 +146,9 @@ class VaultletApp(tk.Tk):
         self.vault = vault
         self.passkeys = passkeys
 
+        self._auth_busy = False
         self.title(APP_NAME)
+        self._configure_app_identity()
         self.geometry("980x660")
         self.minsize(920, 620)
 
@@ -169,9 +173,12 @@ class VaultletApp(tk.Tk):
         status_bar = ttk.Frame(root)
         status_bar.pack(fill="x")
         ttk.Label(status_bar, textvariable=self.status_var).pack(side="left")
-        ttk.Button(status_bar, text="Unlock (Passkey)", command=self.unlock_with_passkey).pack(side="right")
-        ttk.Button(status_bar, text="Unlock (Recovery)", command=self.unlock_with_recovery).pack(side="right", padx=(0, 8))
-        ttk.Button(status_bar, text="Lock", command=self.lock_vault).pack(side="right", padx=(0, 8))
+        self.unlock_btn = ttk.Button(status_bar, text="Unlock (Passkey)", command=self.unlock_with_passkey)
+        self.unlock_btn.pack(side="right")
+        self.recovery_btn = ttk.Button(status_bar, text="Unlock (Recovery)", command=self.unlock_with_recovery)
+        self.recovery_btn.pack(side="right", padx=(0, 8))
+        self.lock_btn = ttk.Button(status_bar, text="Lock", command=self.lock_vault)
+        self.lock_btn.pack(side="right", padx=(0, 8))
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(fill="both", expand=True, pady=(10, 0))
@@ -290,7 +297,8 @@ class VaultletApp(tk.Tk):
         top = ttk.Frame(frm)
         top.pack(fill="x")
 
-        ttk.Button(top, text="Enroll passkey", command=self.enroll_passkey).pack(side="left")
+        self.enroll_btn = ttk.Button(top, text="Enroll passkey", command=self.enroll_passkey)
+        self.enroll_btn.pack(side="left")
         ttk.Button(top, text="Rename", command=self.rename_passkey).pack(side="left", padx=(8, 0))
         ttk.Button(top, text="Revoke", command=self.revoke_passkey).pack(side="left", padx=(8, 0))
 
@@ -315,6 +323,79 @@ class VaultletApp(tk.Tk):
         self._refresh_passkeys()
         self._refresh_status()
 
+    def _configure_app_identity(self) -> None:
+        if sys.platform == "darwin":
+            try:
+                import ctypes
+                import ctypes.util
+
+                libc_path = ctypes.util.find_library("c")
+                if libc_path:
+                    libc = ctypes.CDLL(libc_path)
+                    if hasattr(libc, "setprogname"):
+                        libc.setprogname(APP_NAME.encode("utf-8"))
+            except Exception:
+                pass
+
+        try:
+            self.tk.call("tk", "appname", APP_NAME)
+        except tk.TclError:
+            pass
+
+        if sys.platform == "darwin":
+            try:
+                self.createcommand("tk::mac::Quit", self.destroy)
+            except tk.TclError:
+                pass
+
+    def _set_auth_busy(self, busy: bool, status: str | None = None) -> None:
+        self._auth_busy = busy
+        state = "disabled" if busy else "normal"
+        self.unlock_btn.configure(state=state)
+        self.recovery_btn.configure(state=state)
+        self.lock_btn.configure(state=state)
+        self.enroll_btn.configure(state=state)
+        if status:
+            self.status_var.set(status)
+
+    def _run_background_task(
+        self,
+        task: Callable[[], Any],
+        on_success: Callable[[Any], None],
+        busy_status: str,
+        failure_title: str,
+    ) -> None:
+        if self._auth_busy:
+            self._refresh_status("Another passkey action is already in progress.")
+            return
+
+        self._set_auth_busy(True, busy_status)
+
+        def worker() -> None:
+            try:
+                result = task()
+            except Exception as exc:
+                self.after(0, lambda: self._finish_background_task(error=str(exc), title=failure_title))
+                return
+            self.after(0, lambda: self._finish_background_task(result=result, success=on_success))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_background_task(
+        self,
+        result: Any | None = None,
+        success: Callable[[Any], None] | None = None,
+        error: str | None = None,
+        title: str = "Action failed",
+    ) -> None:
+        self._set_auth_busy(False)
+        if error is not None:
+            self._refresh_status("Vault locked")
+            messagebox.showerror(title, error)
+            return
+        if success is not None:
+            success(result)
+
     def run_first_time_setup(self) -> None:
         should_setup = messagebox.askyesno(
             "Initialize Vault",
@@ -335,13 +416,22 @@ class VaultletApp(tk.Tk):
             f"{recovery_key}",
         )
 
-        result = self.passkeys.register_passkey("Primary passkey")
-        if not result.ok:
-            messagebox.showerror("Passkey enrollment failed", result.error or "Unknown error")
-            return
+        def register_primary_passkey():
+            return self.passkeys.register_passkey("Primary passkey")
 
-        self.vault.unlock_with_local_kek()
-        self._post_unlock("Vault initialized and unlocked.")
+        def finish_primary_passkey(result) -> None:
+            if not result.ok:
+                messagebox.showerror("Passkey enrollment failed", result.error or "Unknown error")
+                return
+            self.vault.unlock_with_local_kek()
+            self._post_unlock("Vault initialized and unlocked.")
+
+        self._run_background_task(
+            register_primary_passkey,
+            finish_primary_passkey,
+            "Opening browser for initial passkey enrollment...",
+            "Passkey enrollment failed",
+        )
 
     def _post_unlock(self, headline: str | None = None) -> None:
         migrated, migration_error = maybe_migrate_legacy_history(self.vault)
@@ -356,6 +446,8 @@ class VaultletApp(tk.Tk):
         self._refresh_status(headline)
 
     def _refresh_status(self, extra: str | None = None) -> None:
+        if self._auth_busy and extra is None:
+            return
         if self.vault.is_unlocked_without_touch():
             status = f"Vault unlocked (auto-lock: {AUTO_LOCK_SECONDS // 60} min idle)"
         else:
@@ -374,16 +466,26 @@ class VaultletApp(tk.Tk):
             messagebox.showerror("No passkeys", "No passkeys are enrolled. Unlock with recovery key first.")
             return
 
-        result = self.passkeys.authenticate_passkey()
-        if not result.ok:
-            messagebox.showerror("Unlock failed", result.error or "Passkey authentication failed.")
-            return
+        def authenticate_passkey():
+            return self.passkeys.authenticate_passkey()
 
-        try:
-            self.vault.unlock_with_local_kek()
-            self._post_unlock("Passkey authentication successful.")
-        except Exception as exc:
-            messagebox.showerror("Unlock failed", str(exc))
+        def finish_auth(result) -> None:
+            if not result.ok:
+                messagebox.showerror("Unlock failed", result.error or "Passkey authentication failed.")
+                self._refresh_status("Vault locked")
+                return
+            try:
+                self.vault.unlock_with_local_kek()
+                self._post_unlock("Passkey authentication successful.")
+            except Exception as exc:
+                messagebox.showerror("Unlock failed", str(exc))
+
+        self._run_background_task(
+            authenticate_passkey,
+            finish_auth,
+            "Opening browser for passkey unlock...",
+            "Unlock failed",
+        )
 
     def unlock_with_recovery(self) -> None:
         if not self.vault.is_setup():
@@ -711,13 +813,23 @@ class VaultletApp(tk.Tk):
             return
 
         label = simpledialog.askstring("Passkey label", "Label for this passkey", parent=self) or "Passkey"
-        result = self.passkeys.register_passkey(label)
-        if not result.ok:
-            messagebox.showerror("Enrollment failed", result.error or "Unknown error")
-            return
 
-        self._refresh_passkeys()
-        self._refresh_status("Passkey enrolled")
+        def register_passkey():
+            return self.passkeys.register_passkey(label)
+
+        def finish_enrollment(result) -> None:
+            if not result.ok:
+                messagebox.showerror("Enrollment failed", result.error or "Unknown error")
+                return
+            self._refresh_passkeys()
+            self._refresh_status("Passkey enrolled")
+
+        self._run_background_task(
+            register_passkey,
+            finish_enrollment,
+            "Opening browser for passkey enrollment...",
+            "Enrollment failed",
+        )
 
     def rename_passkey(self) -> None:
         selected = self.passkey_tree.selection()

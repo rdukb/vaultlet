@@ -44,6 +44,10 @@ If you do not use `uv`, you can use `python -m venv` and `pip` instead.
 uv run python -m app.main
 ```
 
+On macOS, this developer-mode launch is expected to show the window title as `Vaultlet` but the menu bar app name may still appear as `Python`. That menu bar label comes from the host interpreter process, not just the Tk window title.
+
+If you want to verify native macOS app identity (`Vaultlet` in the menu bar / Dock), test using a packaged app bundle instead of `uv run`.
+
 ## First-run setup (detailed)
 1. Launch the app:
    - `uv run python -m app.main`
@@ -83,6 +87,22 @@ uv run python -m app.main vault wipe
 # run pyinstaller via uv without globally installing it
 uvx --from pyinstaller pyinstaller --onedir --windowed app/main.py --name Vaultlet
 ```
+
+After building on macOS, launch the packaged app bundle to test native app identity:
+```bash
+open dist/Vaultlet.app
+```
+
+If you prefer launching the binary directly:
+```bash
+./dist/Vaultlet.app/Contents/MacOS/Vaultlet
+```
+
+Use the packaged `.app` when checking:
+- menu bar app name
+- Dock label
+- app switching behavior
+- other macOS-native window/app identity details
 
 ## Migration guide
 ### A) Migrate from pre-v1 Vaultlet local history (`pw_history`)
